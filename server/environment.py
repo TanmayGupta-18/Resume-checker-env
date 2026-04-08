@@ -157,7 +157,7 @@ ALL_ACTIONS = [
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ACTIONS — Improved for better score progression
+# ACTIONS
 # ══════════════════════════════════════════════════════════════════════════════
 
 def apply_action(action_name: str, resume: dict, jd: dict) -> Tuple[dict, bool, str]:
@@ -199,11 +199,11 @@ def _quantify_achievement(resume, jd):
                     exp["bullets"][i] = bullet.rstrip(".") + ", processing 650K+ records with 95% data quality."
                 else:
                     exp["bullets"][i] = bullet.rstrip(".") + ", delivering 42% performance improvement and handling large-scale data."
-                return True, f"Quantified bullet successfully"
+                return True, "Quantified bullet successfully"
     return False, "No unquantified bullets left"
 
+
 def _remove_weak_phrase(resume, jd):
-    """Aggressive weak phrase cleanup."""
     weak_map = {
         "helped": "Led", "assisted": "Drove", "worked on": "Developed",
         "did ": "Executed ", "was involved": "Owned", "learned": "Mastered",
@@ -220,9 +220,8 @@ def _remove_weak_phrase(resume, jd):
                     changed = True
             exp["bullets"][i] = new_bullet.strip()
 
-    # Clean skills
     before = len(resume.get("skills", []))
-    resume["skills"] = [s for s in resume.get("skills", []) 
+    resume["skills"] = [s for s in resume.get("skills", [])
                         if not any(w in s.lower() for w in ["some", "basic", "helped with"])]
     if len(resume.get("skills", [])) < before:
         changed = True
@@ -264,7 +263,6 @@ def _tailor_summary(resume, jd):
 def _add_relevant_project(resume, jd):
     if not resume.get("projects"):
         return False, "No projects available"
-    # Simple move first project to top if not already
     if len(resume["projects"]) > 1:
         proj = resume["projects"].pop(0)
         resume["projects"].insert(0, proj)
@@ -301,22 +299,21 @@ def _strengthen_bullet(resume, jd):
 
 def _compute_score(missing_kw, weak_count, quantified, total_bullets,
                    skill_ratio, tailored, irrelevant):
-    """Improved scoring - more generous and balanced"""
-    kw_score    = max(0.0, 1.0 - len(missing_kw) / 5.0)
-    quant_score = min(1.0, (quantified / max(total_bullets, 1)) * 2.2)   # Big reward for numbers
-    weak_score  = max(0.0, 1.0 - weak_count / max(total_bullets * 0.7, 1))
-    skill_score = min(1.0, skill_ratio * 1.7)
-    summary_score = 1.0 if tailored else 0.6   # partial credit
+    kw_score      = max(0.0, 1.0 - len(missing_kw) / 5.0)
+    quant_score   = min(1.0, (quantified / max(total_bullets, 1)) * 2.2)
+    weak_score    = max(0.0, 1.0 - weak_count / max(total_bullets * 0.7, 1))
+    skill_score   = min(1.0, skill_ratio * 1.7)
+    summary_score = 1.0 if tailored else 0.6
 
     score = (
         0.28 * kw_score
-      + 0.32 * quant_score      # Highest weight on quantification
+      + 0.32 * quant_score
       + 0.20 * weak_score
       + 0.12 * skill_score
       + 0.13 * summary_score
       - 0.05 * min(irrelevant, 2)
     )
-    return max(0.25, min(0.95, round(score, 3)))   # Higher minimum score
+    return max(0.25, min(0.95, round(score, 3)))
 
 
 def compute_state(resume: dict, jd: dict, steps_taken: int = 0, max_steps: int = 10, prev_resume: Optional[dict] = None) -> dict:
@@ -330,7 +327,7 @@ def compute_state(resume: dict, jd: dict, steps_taken: int = 0, max_steps: int =
 
     score = _compute_score(missing_kw, weak_count, quantified, total, skill_ratio, tailored, irrelevant)
 
-    state = {
+    return {
         "current_score": round(score, 3),
         "steps_taken": steps_taken,
         "steps_remaining": max_steps - steps_taken,
@@ -350,10 +347,8 @@ def compute_state(resume: dict, jd: dict, steps_taken: int = 0, max_steps: int =
         "job_description": jd,
         "resume_comparison": {"summary": "Changes applied", "num_changes": 1 if prev_resume else 0}
     }
-    return state
 
 
-# Helper functions (unchanged)
 def _missing_keywords(resume, jd):
     text = _flatten_text(resume).lower()
     return [s for s in jd["required_skills"] + jd["preferred_skills"] if s.lower() not in text]
@@ -397,7 +392,7 @@ def _flatten_text(resume):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class ResumeOptimizationEnv:
-    MAX_STEPS = 10
+    MAX_STEPS = 10  # fallback default
 
     def __init__(self, task: str = "easy", seed: int = None):
         if task not in ["easy", "medium", "hard"]:
@@ -410,13 +405,15 @@ class ResumeOptimizationEnv:
         self._steps_taken = 0
         self._initial_score = 0.0
         self._done = False
+        # Per-task step limits
+        self._max_steps = {"easy": 10, "medium": 15, "hard": 20}[task]
 
     def reset(self) -> dict:
         self._resume = copy.deepcopy(RESUMES[self.task])
         self._jd = copy.deepcopy(JOB_DESCRIPTIONS[self.task])
         self._steps_taken = 0
         self._done = False
-        s = compute_state(self._resume, self._jd, 0, self.MAX_STEPS)
+        s = compute_state(self._resume, self._jd, 0, self._max_steps)
         self._initial_score = s["current_score"]
         return s
 
@@ -431,13 +428,14 @@ class ResumeOptimizationEnv:
         self._resume = new_resume
         self._steps_taken += 1
 
-        new_state = compute_state(self._resume, self._jd, self._steps_taken, self.MAX_STEPS)
+        new_state = compute_state(self._resume, self._jd, self._steps_taken, self._max_steps)
 
         score_delta = new_state["current_score"] - prev_score
-        reward = 7.0 * score_delta + (0.25 if success else -0.02)
-        reward = round(max(-0.15, min(0.70, reward)), 4)
+        reward = 1.75 * score_delta + (0.06 if success else 0.00)
+        reward = round(max(0, min(0.70, reward)), 1)
 
-        self._done = self._steps_taken >= self.MAX_STEPS or new_state["current_score"] >= 0.95
+        # done when score hits 0.95 OR task-specific step limit reached
+        self._done = self._steps_taken >= self._max_steps or new_state["current_score"] >= 0.95
 
         info = {
             "action_success": success,
@@ -448,7 +446,7 @@ class ResumeOptimizationEnv:
         return new_state, reward, self._done, info
 
     def state(self) -> dict:
-        return compute_state(self._resume, self._jd, self._steps_taken, self.MAX_STEPS)
+        return compute_state(self._resume, self._jd, self._steps_taken, self._max_steps)
 
     def grade(self) -> float:
         final = self.state()["current_score"]
