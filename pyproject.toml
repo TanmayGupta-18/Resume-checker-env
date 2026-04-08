@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "resume-optimization-env"
 version = "1.0.0"
-description = "An OpenEnv-compatible environment where an AI agent learns to optimize job application resumes"
+description = "An OpenEnv-compatible environment for resume optimization"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -13,7 +13,8 @@ dependencies = [
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
     "pydantic>=2.0",
-    "python-multipart>=0.0.6"
+    "python-multipart>=0.0.6",
+    "openenv-core>=0.2.0",
 ]
 
 [project.scripts]
