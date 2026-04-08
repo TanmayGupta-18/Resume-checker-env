@@ -22,6 +22,7 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:7860")
 LITELLM_BASE_URL = "https://litellm.sclr.ac/"
 HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.3-70B-Instruct")
+ENV_NAME = os.getenv("ENV_NAME", "resume-optimization")
 
 TASKS = ["easy", "medium", "hard"]
 MAX_STEPS = 12
@@ -35,15 +36,19 @@ def get_client():
         return None
 
 def log_start(task: str):
-    print(f"[START] task={task}", flush=True)
+    print(f"[START] task={task} env={ENV_NAME} model={MODEL_NAME}", flush=True)
 
 def log_step(step: int, action: str, reward: float, done: bool, error: str = None):
     error_val = error if error else "null"
     done_val = str(done).lower()
     print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float], task: str):
-    print(f"[END] task={task} score={score:.2f} steps={steps}", flush=True)
+def log_end(success: bool, steps: int, score: float, rewards: List[float]):
+    success_val = str(success).lower()
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    # Clamp score to [0, 1]
+    score = max(0.0, min(1.0, score))
+    print(f"[END] success={success_val} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
 
 def select_action(obs: Dict, client, task: str = "easy"):
     if task == "hard":
@@ -70,6 +75,7 @@ def run_episode(task: str, client):
     rewards = []
     steps_taken = 0
     final_score = 0.0
+    success = False
 
     # Per-task step limits
     task_max_steps = {"easy": 10, "medium": 15, "hard": 20}
@@ -98,7 +104,7 @@ def run_episode(task: str, client):
 
                 rewards.append(reward)
                 steps_taken += 1
-                final_score = float(obs.get("current_score", 0.0))
+                final_score = max(0.0, min(1.0, float(obs.get("current_score", 0.0))))
 
                 log_step(steps_taken, action, reward, done, step_error)
 
@@ -110,11 +116,13 @@ def run_episode(task: str, client):
                 break
 
         success = final_score >= 0.55
-        log_end(success, steps_taken, final_score, rewards, task)
 
     except Exception as e:
         print(f"[ERROR] {task}: {e}", flush=True)
-        log_end(False, steps_taken, final_score, rewards, task)
+
+    finally:
+        # Always emit [END] even on exception
+        log_end(success, steps_taken, final_score, rewards)
 
 def main():
     client = get_client()
