@@ -37,14 +37,21 @@ def get_client():
 def log_start(task: str):
     print(f"[START] task={task}", flush=True)
 
-def log_step(step: int, action: str, reward: float, done: bool):
-    print(f"[STEP] step={step} reward={reward:.2f}", flush=True)
+def log_step(step: int, action: str, reward: float, done: bool, error: str = None):
+    error_val = error if error else "null"
+    done_val = str(done).lower()
+    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
-def log_end(success: bool, steps: int, score: float, rewards: list, task: str):
+def log_end(success: bool, steps: int, score: float, rewards: List[float], task: str):
     print(f"[END] task={task} score={score:.2f} steps={steps}", flush=True)
 
-def select_action(obs: Dict, client):
-    # Pure heuristic - very reliable for this environment
+def select_action(obs: Dict, client, task: str = "easy"):
+    if task == "hard":
+        if obs.get("needs_quantification"):
+            return "quantify_achievement"
+        if obs.get("needs_weak_cleanup") or obs.get("weak_phrases_count", 0) > 0:
+            return "remove_weak_phrase"
+    # General heuristic
     if obs.get("needs_keyword_work") and obs.get("missing_keywords"):
         return "add_missing_keyword"
     if obs.get("needs_quantification"):
@@ -64,6 +71,10 @@ def run_episode(task: str, client):
     steps_taken = 0
     final_score = 0.0
 
+    # Per-task step limits
+    task_max_steps = {"easy": 10, "medium": 15, "hard": 20}
+    max_steps = task_max_steps.get(task, MAX_STEPS)
+
     try:
         r = requests.post(f"{API_BASE_URL}/reset", json={"task": task, "seed": 42}, timeout=10)
         r.raise_for_status()
@@ -72,24 +83,30 @@ def run_episode(task: str, client):
         log_start(task)
 
         done = False
-        while not done and steps_taken < MAX_STEPS:
-            action = select_action(obs, client)
+        while not done and steps_taken < max_steps:
+            action = select_action(obs, client, task)
 
-            r = requests.post(f"{API_BASE_URL}/step", json={"name": action}, timeout=15)
-            r.raise_for_status()
-            data = r.json()
+            try:
+                r = requests.post(f"{API_BASE_URL}/step", json={"name": action}, timeout=15)
+                r.raise_for_status()
+                data = r.json()
 
-            obs = data["observation"]
-            reward = float(data.get("reward", 0.0))
-            done = bool(data.get("done", False))
+                obs = data["observation"]
+                reward = float(data.get("reward", 0.0))
+                done = bool(data.get("done", False))
+                step_error = data.get("error", None)
 
-            rewards.append(reward)
-            steps_taken += 1
-            final_score = float(obs.get("current_score", 0.0))
+                rewards.append(reward)
+                steps_taken += 1
+                final_score = float(obs.get("current_score", 0.0))
 
-            log_step(steps_taken, action, reward, done)
+                log_step(steps_taken, action, reward, done, step_error)
 
-            if final_score >= 0.85:
+            except requests.RequestException as e:
+                log_step(steps_taken + 1, action, 0.0, False, str(e))
+                break
+
+            if final_score >= 0.95:
                 break
 
         success = final_score >= 0.55
