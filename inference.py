@@ -35,14 +35,13 @@ def get_client():
         return None
 
 def log_start(task: str):
-    print(f"[START] task={task} env=resume-optimization model={MODEL_NAME}", flush=True)
+    print(f"[START] task={task}", flush=True)
 
 def log_step(step: int, action: str, reward: float, done: bool):
-    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error=null", flush=True)
+    print(f"[STEP] step={step} reward={reward:.2f}", flush=True)
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]):
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+def log_end(success: bool, steps: int, score: float, rewards: list, task: str):
+    print(f"[END] task={task} score={score:.2f} steps={steps}", flush=True)
 
 def select_action(obs: Dict, client):
     # Pure heuristic - very reliable for this environment
@@ -94,11 +93,11 @@ def run_episode(task: str, client):
                 break
 
         success = final_score >= 0.55
-        log_end(success, steps_taken, final_score, rewards)
+        log_end(success, steps_taken, final_score, rewards, task)
 
     except Exception as e:
         print(f"[ERROR] {task}: {e}", flush=True)
-        log_end(False, steps_taken, final_score, rewards)
+        log_end(False, steps_taken, final_score, rewards, task)
 
 def main():
     client = get_client()
