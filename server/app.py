@@ -20,6 +20,7 @@ from models import (
 
 from server.environment import ResumeOptimizationEnv
 from pydantic import BaseModel
+from typing import Optional
 
 class ResetRequest(BaseModel):
     task: str = "default"
@@ -97,13 +98,16 @@ def root():
 
 # 🔁 RESET
 @app.post("/reset", response_model=Observation)
-def reset(request: ResetRequest, req: Request):
-    env = ResumeOptimizationEnv(task=request.task, seed=request.seed)
+def reset(request: Optional[ResetRequest] = None, req: Request = None):
+    # Use defaults if no body is provided
+    task = request.task if request else "default"
+    seed = request.seed if request else 0
+
+    env = ResumeOptimizationEnv(task=task, seed=seed)
     req.app.state.env = env
 
     state = env.reset()
     return _state_to_observation(state)
-
 
 # ⚡ STEP
 @app.post("/step", response_model=StepResponse)
