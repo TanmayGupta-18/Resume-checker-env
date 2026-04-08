@@ -1,0 +1,106 @@
+name: resume-optimization-env
+version: 1.0.0
+description: >
+  An OpenEnv-compatible environment where an AI agent learns to optimize
+  job application resumes through sequential actions. The agent reads a
+  candidate resume and a target job description, then takes actions to
+  improve the match — adding keywords, quantifying achievements, removing
+  weak language, and tailoring content. Simulates a real task that every
+  job seeker performs manually today.
+
+task:
+  type: sequential-decision
+  domain: career / human resources
+  real_world: true
+
+tasks:
+  - id: easy
+    description: Resume is a reasonable match. Add keywords, reorder skills, tailor summary.
+    difficulty: easy
+    max_steps: 10
+    target_score: 0.75
+
+  - id: medium
+    description: Weak language, unquantified bullets, missing keywords. Full restructure needed.
+    difficulty: medium
+    max_steps: 10
+    target_score: 0.65
+
+  - id: hard
+    description: Career pivot — resume from different domain. Remove irrelevant content, reframe skills.
+    difficulty: hard
+    max_steps: 10
+    target_score: 0.55
+
+observation_space:
+  type: dict
+  fields:
+    current_score:          {type: float, range: [0.0, 1.0]}
+    steps_taken:            {type: int}
+    steps_remaining:        {type: int}
+    missing_keywords:       {type: "list[str]"}
+    weak_phrases_count:     {type: int}
+    quantified_bullets:     {type: int}
+    total_bullets:          {type: int}
+    skill_match_ratio:      {type: float, range: [0.0, 1.0]}
+    summary_tailored:       {type: bool}
+    irrelevant_skills_count:{type: int}
+    needs_keyword_work:     {type: bool}
+    needs_quantification:   {type: bool}
+    needs_weak_cleanup:     {type: bool}
+    needs_summary_work:     {type: bool}
+    needs_skill_reorder:    {type: bool}
+    resume:                 {type: dict}
+    job_description:        {type: dict}
+
+action_space:
+  type: discrete
+  actions:
+    - add_missing_keyword
+    - quantify_achievement
+    - remove_weak_phrase
+    - reorder_skills
+    - tailor_summary
+    - add_relevant_project
+    - remove_irrelevant_content
+    - strengthen_bullet
+
+reward:
+  type: dense
+  description: >
+    Improved shaped reward = 3.0 × score_delta + 0.08 success bonus - 0.04 failure penalty.
+    Makes learning much faster and gives clear signal about which actions improve the resume.
+  range: [-0.1, 0.45]
+  partial_credit: true
+
+grader:
+  type: programmatic
+  deterministic: true
+  weights:
+    keyword_coverage:      0.30
+    bullet_quantification: 0.25
+    weak_language:         0.20
+    skill_match_ratio:     0.15
+    summary_tailoring:     0.10
+    irrelevant_penalty:   -0.05
+
+baseline:
+  model: meta-llama/Llama-3.3-70B-Instruct
+  script: baseline_agent.py
+  seed: 42
+
+server:
+  framework: FastAPI
+  port: 7860
+  endpoints:
+    - POST /reset
+    - POST /step
+    - GET  /state
+    - GET  /grade
+    - GET  /actions
+
+deployment:
+  platform: Hugging Face Spaces
+  dockerfile: server/Dockerfile
+
+license: MIT

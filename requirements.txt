@@ -1,0 +1,14 @@
+# Core server dependencies
+fastapi==0.111.0
+uvicorn==0.30.0
+pydantic==2.7.1
+
+# OpenAI client — used with Hugging Face router for open source models
+# Set HF_TOKEN env var and point base_url to https://router.huggingface.co/v1
+openai==1.30.1
+
+# HTTP client — for client.py
+requests==2.32.2
+
+# YAML parsing — for openenv.yaml
+pyyaml==6.0.1
