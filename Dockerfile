@@ -2,16 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Copy all files
+COPY . .
+
 # Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir \
+    fastapi uvicorn pydantic requests openai python-multipart openenv-core
 
-# Copy all source files
-COPY models.py .
-COPY server/ ./server/
-
-# Hugging Face Spaces uses port 7860
+# Expose port
 EXPOSE 7860
 
-# Start the FastAPI server
+# Run the server using uvicorn
 CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]
