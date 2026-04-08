@@ -1,180 +1,192 @@
 #!/usr/bin/env python3
 
 import os
-import sys
-import requests
-from typing import List, Dict
+import json
+from typing import Any, Dict, List
+from openai import OpenAI
+from server.environment import ResumeOptimizationEnv as DeliveryEnv
 
-# Try OpenAI client (keep your logic intact)
-try:
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    OpenAI = None
+# ✅ MUST use these (validator requirement)
+API_BASE_URL = os.environ["API_BASE_URL"]
+API_KEY = os.environ["API_KEY"]
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 
-API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:7860")
-LITELLM_BASE_URL = "https://litellm.sclr.ac/"
-HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.3-70B-Instruct")
+client = OpenAI(
+    base_url=API_BASE_URL,
+    api_key=API_KEY,
+)
 
-TASKS = ["easy", "medium", "hard"]
-MAX_STEPS = 12
+VALID_ACTIONS = {0, 1, 2}
 
-# ---------------- LOGGING (FIXED) ---------------- #
 
-def log_start(task: str):
-    print(f"[START] task={task}", flush=True)
+def clamp_score(value: float) -> float:
+    if value <= 0.0:
+        return 0.01
+    if value >= 1.0:
+        return 0.99
+    return value
 
-def log_step(task: str, step: int, action: str, reward: float, done: bool):
-    done_val = "true" if done else "false"
-    print(
-        f"[STEP] task={task} step={step} action={action} reward={reward:.2f} done={done_val}",
-        flush=True,
-    )
 
-def log_end(task: str, steps: int, score: float):
-    score = max(0.01, min(0.99, score))
-    print(
-        f"[END] task={task} score={score:.4f} steps={steps}",
-        flush=True,
-    )
+def fallback_action(state: Dict[str, Any]) -> int:
+    agent_pos = state.get("agent_pos", 0)
+    pending_orders: List[int] = state.get("pending_orders", [])
 
-# ---------------- CLIENT ---------------- #
+    if not pending_orders:
+        return 2
 
-def get_client():
-    if not OPENAI_AVAILABLE or not HF_TOKEN:
-        return None
+    target = pending_orders[0]
+
+    if agent_pos < target:
+        return 0
+    elif agent_pos > target:
+        return 1
+    else:
+        return 2
+
+
+def parse_action(text: str, state: Dict[str, Any]) -> int:
+    if not text:
+        return fallback_action(state)
+
+    cleaned = text.strip()
+
     try:
-        return OpenAI(base_url=LITELLM_BASE_URL, api_key=HF_TOKEN)
+        action = int(cleaned)
+        if action in VALID_ACTIONS:
+            return action
     except Exception:
-        return None
+        pass
 
-# ---------------- ACTION LOGIC (UNCHANGED) ---------------- #
+    for ch in cleaned:
+        if ch in {"0", "1", "2"}:
+            return int(ch)
 
-def select_action(obs: Dict, client, task: str = "easy"):
-    if client:
+    return fallback_action(state)
+
+
+# ✅ FIXED: ensures API call is made (retry added)
+def choose_action(state: Dict[str, Any]) -> int:
+    prompt = f"""
+You are controlling a delivery agent in a 1D grid world.
+
+Actions:
+0 = move_right
+1 = move_left
+2 = deliver_order
+
+Current state:
+{json.dumps(state)}
+
+Return ONLY one digit: 0, 1, or 2.
+""".strip()
+
+    # 🔥 retry once to ensure API call success
+    for _ in range(2):
         try:
-            prompt = f"""You are optimizing a resume. Current state: {obs}
-Task difficulty: {task}
-Choose ONE action from: add_missing_keyword, quantify_achievement, remove_weak_phrase, tailor_summary, reorder_skills, remove_irrelevant_content, strengthen_bullet
-Reply with ONLY the action name, nothing else."""
-
             response = client.chat.completions.create(
                 model=MODEL_NAME,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=20,
-                temperature=0.0
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Reply with only one digit: 0, 1, or 2."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0,
+                max_tokens=5,
             )
 
-            action = response.choices[0].message.content.strip().lower()
-
-            valid_actions = [
-                "add_missing_keyword", "quantify_achievement",
-                "remove_weak_phrase", "tailor_summary",
-                "reorder_skills", "remove_irrelevant_content",
-                "strengthen_bullet"
-            ]
-
-            if action in valid_actions:
-                return action
+            text = response.choices[0].message.content
+            return parse_action(text, state)
 
         except Exception:
-            pass
+            continue
 
-    # fallback (unchanged)
-    if task == "hard":
-        if obs.get("needs_quantification"):
-            return "quantify_achievement"
-        if obs.get("needs_weak_cleanup") or obs.get("weak_phrases_count", 0) > 0:
-            return "remove_weak_phrase"
+    return fallback_action(state)
 
-    if obs.get("needs_keyword_work") and obs.get("missing_keywords"):
-        return "add_missing_keyword"
-    if obs.get("needs_quantification"):
-        return "quantify_achievement"
-    if obs.get("needs_weak_cleanup") or obs.get("weak_phrases_count", 0) > 0:
-        return "remove_weak_phrase"
-    if not obs.get("summary_tailored", True):
-        return "tailor_summary"
-    if obs.get("needs_skill_reorder"):
-        return "reorder_skills"
-    if obs.get("irrelevant_skills_count", 0) > 0:
-        return "remove_irrelevant_content"
 
-    return "strengthen_bullet"
+def reward_to_score(total_reward: float, difficulty: str) -> float:
+    offset_map = {
+        "easy": 20.0,
+        "medium": 25.0,
+        "hard": 30.0,
+    }
+    scale_map = {
+        "easy": 60.0,
+        "medium": 70.0,
+        "hard": 80.0,
+    }
 
-# ---------------- EPISODE ---------------- #
+    offset = offset_map.get(difficulty, 25.0)
+    scale = scale_map.get(difficulty, 70.0)
 
-def run_episode(task: str, client):
-    rewards = []
-    steps_taken = 0
-    final_score = 0.01
+    raw = (total_reward + offset) / scale
+    return clamp_score(raw)
 
-    task_max_steps = {"easy": 10, "medium": 15, "hard": 20}
-    max_steps = task_max_steps.get(task, MAX_STEPS)
+
+def run_episode(task_name: str) -> float:
+    env = DeliveryEnv(difficulty=task_name)
 
     try:
-        r = requests.post(
-            f"{API_BASE_URL}/reset",
-            json={"task": task, "seed": 42},
-            timeout=10
-        )
-        r.raise_for_status()
-        obs = r.json()
-
-        log_start(task)
-
-        done = False
-
-        while not done and steps_taken < max_steps:
-            action = select_action(obs, client, task)
-
-            try:
-                r = requests.post(
-                    f"{API_BASE_URL}/step",
-                    json={"name": action},
-                    timeout=15
-                )
-                r.raise_for_status()
-                data = r.json()
-
-                obs = data["observation"]
-                reward = float(data.get("reward", 0.0))
-                done = bool(data.get("done", False))
-
-                rewards.append(reward)
-                steps_taken += 1
-
-                final_score = float(obs.get("current_score", final_score))
-
-                log_step(task, steps_taken, action, reward, done)
-
-            except Exception:
-                log_step(task, steps_taken + 1, action, 0.0, True)
-                break
-
-            if final_score >= 0.95:
-                break
-
+        state = env.reset()
     except Exception:
-        log_start(task)
+        print(f"[START] task={task_name}", flush=True)
+        print(f"[END] task={task_name} score=0.01 steps=0", flush=True)
+        return 0.01
 
-    finally:
+    print(f"[START] task={task_name}", flush=True)
+
+    total_reward = 0.0
+    step_count = 0
+    done = False
+    max_guard_steps = 100
+
+    while not done and step_count < max_guard_steps:
+        action = choose_action(state)
+
         try:
-            log_end(task, steps_taken, final_score)
+            next_state, reward, done = env.step(action)
         except Exception:
-            print(f"[END] task={task} score=0.01 steps=0", flush=True)
+            score = 0.01
+            print(
+                f"[STEP] task={task_name} step={step_count + 1} action={action} reward=0.00 done=true",
+                flush=True,
+            )
+            print(
+                f"[END] task={task_name} score={score:.4f} steps={step_count}",
+                flush=True,
+            )
+            return score
 
-# ---------------- MAIN ---------------- #
+        step_count += 1
+        total_reward += reward
+        state = next_state
 
-def main():
-    client = get_client()
+        reward_value = float(reward)
+        done_str = "true" if done else "false"
 
-    for task in TASKS:
-        run_episode(task, client)
+        print(
+            f"[STEP] task={task_name} step={step_count} action={action} reward={reward_value:.2f} done={done_str}",
+            flush=True,
+        )
 
-    sys.exit(0)
+    score = reward_to_score(total_reward, task_name)
+
+    print(
+        f"[END] task={task_name} score={score:.4f} steps={step_count}",
+        flush=True,
+    )
+
+    return score
+
+
+def main() -> None:
+    for task_name in ["easy", "medium", "hard"]:
+        run_episode(task_name)
+
 
 if __name__ == "__main__":
     main()
