@@ -19,6 +19,12 @@ from models import (
 )
 
 from server.environment import ResumeOptimizationEnv
+from pydantic import BaseModel
+
+class ResetRequest(BaseModel):
+    task: str = "default"
+    seed: int = 0
+
 
 app = FastAPI(
     title="Resume Optimization Environment",
