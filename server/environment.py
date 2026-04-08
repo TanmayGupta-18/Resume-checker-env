@@ -316,7 +316,7 @@ def _compute_score(missing_kw, weak_count, quantified, total_bullets,
       + 0.13 * summary_score
       - 0.05 * min(irrelevant, 2)
     )
-    return max(0.25, min(1.0, round(score, 3)))   # Higher minimum score
+    return max(0.25, min(0.95, round(score, 3)))   # Higher minimum score
 
 
 def compute_state(resume: dict, jd: dict, steps_taken: int = 0, max_steps: int = 10, prev_resume: Optional[dict] = None) -> dict:
