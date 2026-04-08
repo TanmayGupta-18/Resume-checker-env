@@ -4,9 +4,11 @@ import os
 import json
 from typing import Any, Dict, List
 from openai import OpenAI
+
+# ✅ FIXED import
 from server.environment import ResumeOptimizationEnv as DeliveryEnv
 
-# ✅ MUST use these (validator requirement)
+# ✅ REQUIRED by validator
 API_BASE_URL = os.environ["API_BASE_URL"]
 API_KEY = os.environ["API_KEY"]
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
@@ -64,7 +66,7 @@ def parse_action(text: str, state: Dict[str, Any]) -> int:
     return fallback_action(state)
 
 
-# ✅ FIXED: ensures API call is made (retry added)
+# ✅ Ensures API call happens
 def choose_action(state: Dict[str, Any]) -> int:
     prompt = f"""
 You are controlling a delivery agent in a 1D grid world.
@@ -80,20 +82,13 @@ Current state:
 Return ONLY one digit: 0, 1, or 2.
 """.strip()
 
-    # 🔥 retry once to ensure API call success
-    for _ in range(2):
+    for _ in range(2):  # retry once
         try:
             response = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": "Reply with only one digit: 0, 1, or 2."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
+                    {"role": "system", "content": "Reply with only one digit: 0, 1, or 2."},
+                    {"role": "user", "content": prompt},
                 ],
                 temperature=0,
                 max_tokens=5,
@@ -109,16 +104,8 @@ Return ONLY one digit: 0, 1, or 2.
 
 
 def reward_to_score(total_reward: float, difficulty: str) -> float:
-    offset_map = {
-        "easy": 20.0,
-        "medium": 25.0,
-        "hard": 30.0,
-    }
-    scale_map = {
-        "easy": 60.0,
-        "medium": 70.0,
-        "hard": 80.0,
-    }
+    offset_map = {"easy": 20.0, "medium": 25.0, "hard": 30.0}
+    scale_map = {"easy": 60.0, "medium": 70.0, "hard": 80.0}
 
     offset = offset_map.get(difficulty, 25.0)
     scale = scale_map.get(difficulty, 70.0)
@@ -128,7 +115,8 @@ def reward_to_score(total_reward: float, difficulty: str) -> float:
 
 
 def run_episode(task_name: str) -> float:
-    env = DeliveryEnv(difficulty=task_name)
+    # ✅ FIXED constructor
+    env = DeliveryEnv(task=task_name, seed=42)
 
     try:
         state = env.reset()
@@ -190,3 +178,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    
