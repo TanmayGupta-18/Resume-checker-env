@@ -36,19 +36,15 @@ def get_client():
         return None
 
 def log_start(task: str):
-    print(f"[START] task={task} env={ENV_NAME} model={MODEL_NAME}", flush=True)
+    print(f"[START] task={task}", flush=True)
 
-def log_step(step: int, action: str, reward: float, done: bool, error: str = None):
-    error_val = error if error else "null"
-    done_val = str(done).lower()
-    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
+def log_step(task: str, step: int, action: str, reward: float, done: bool):
+    done_val = "true" if done else "false"
+    print(f"[STEP] task={task} step={step} action={action} reward={reward:.2f} done={done_val}", flush=True)
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]):
-    success_val = str(success).lower()
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    # Clamp score to [0, 1]
-    score = max(0.0, min(1.0, score))
-    print(f"[END] success={success_val} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
+def log_end(task: str, steps: int, score: float):
+    score = max(0.01, min(0.99, score))
+    print(f"[END] task={task} score={score:.4f} steps={steps}", flush=True)
 
 def select_action(obs: Dict, client, task: str = "easy"):
     # Use LLM if available
