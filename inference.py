@@ -51,12 +51,39 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]):
     print(f"[END] success={success_val} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
 
 def select_action(obs: Dict, client, task: str = "easy"):
+    # Use LLM if available
+    if client:
+        try:
+            prompt = f"""You are optimizing a resume. Current state: {obs}
+Task difficulty: {task}
+Choose ONE action from: add_missing_keyword, quantify_achievement, remove_weak_phrase, tailor_summary, reorder_skills, remove_irrelevant_content, strengthen_bullet
+Reply with ONLY the action name, nothing else."""
+
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=20,
+                temperature=0.0
+            )
+            action = response.choices[0].message.content.strip().lower()
+            # Validate it's a known action
+            valid_actions = [
+                "add_missing_keyword", "quantify_achievement",
+                "remove_weak_phrase", "tailor_summary",
+                "reorder_skills", "remove_irrelevant_content",
+                "strengthen_bullet"
+            ]
+            if action in valid_actions:
+                return action
+        except Exception:
+            pass  # Fall back to heuristic
+
+    # Fallback heuristic if no client or LLM fails
     if task == "hard":
         if obs.get("needs_quantification"):
             return "quantify_achievement"
         if obs.get("needs_weak_cleanup") or obs.get("weak_phrases_count", 0) > 0:
             return "remove_weak_phrase"
-    # General heuristic
     if obs.get("needs_keyword_work") and obs.get("missing_keywords"):
         return "add_missing_keyword"
     if obs.get("needs_quantification"):
